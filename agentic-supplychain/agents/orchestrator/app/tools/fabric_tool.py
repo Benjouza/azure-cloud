@@ -2,16 +2,13 @@
 Fabric Data Agent Tool
 Queries the Microsoft Fabric data agent for structured supply chain analytics.
 
-The Fabric data agent is configured as a RemoteTool connection in the
-Foundry project. This module wraps the call with error handling and
-provides a mock fallback for local development.
+The Fabric data agent exposes an MCP (Model Context Protocol) server endpoint.
+This module connects via SSE transport and invokes the agent's tools.
 
 Requires: FABRIC_DATA_AGENT_ENDPOINT in environment
 """
 from __future__ import annotations
-import os
 import logging
-import httpx
 
 from ..config import settings
 from ..models import FabricResult
@@ -42,7 +39,7 @@ _MOCK_FABRIC_RESPONSE = {
 
 async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
     """
-    Send a natural-language question to the Fabric data agent.
+    Send a natural-language question to the Fabric data agent via MCP protocol.
     Falls back to mock data if the endpoint is not configured.
     """
     endpoint = settings.fabric_data_agent_endpoint
@@ -56,41 +53,63 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
         )
 
     try:
-        # Acquire token for Fabric API
         from azure.identity import DefaultAzureCredential
+        from mcp import ClientSession
+        from mcp.client.sse import sse_client
+
         credential = DefaultAzureCredential()
         token = credential.get_token("https://api.fabric.microsoft.com/.default")
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Fabric data agent uses OpenAI-compatible chat completions format
-            response = await client.post(
-                endpoint,
-                json={
-                    "messages": [
-                        {"role": "user", "content": question}
-                    ],
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {token.token}",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        headers = {"Authorization": f"Bearer {token.token}"}
 
-            # Extract answer from OpenAI-style response
-            summary = ""
-            if "choices" in data and data["choices"]:
-                summary = data["choices"][0].get("message", {}).get("content", "")
-            
-            return FabricResult(
-                success=True,
-                data=data,
-                summary=summary or str(data),
-            )
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Fabric agent HTTP error: {e.response.status_code}")
-        return FabricResult(success=False, error=f"HTTP {e.response.status_code}: {e.response.text}")
+        async with sse_client(endpoint, headers=headers) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+
+                # List available tools to find the query/chat tool
+                tools_result = await session.list_tools()
+                tool_names = [t.name for t in tools_result.tools]
+                logger.info(f"Fabric MCP tools available: {tool_names}")
+
+                # Call the appropriate tool — Fabric data agents typically expose
+                # "query" or "ask" or similar; try common names
+                target_tool = None
+                for candidate in ["query", "ask", "chat", "execute_query", "run_query"]:
+                    if candidate in tool_names:
+                        target_tool = candidate
+                        break
+
+                if not target_tool and tool_names:
+                    # Fall back to first available tool
+                    target_tool = tool_names[0]
+                    logger.info(f"Using first available tool: {target_tool}")
+
+                if not target_tool:
+                    return FabricResult(
+                        success=False,
+                        error="No tools available on Fabric MCP agent",
+                    )
+
+                result = await session.call_tool(
+                    target_tool,
+                    arguments={"question": question},
+                )
+
+                # Extract text content from MCP result
+                summary = ""
+                data = {}
+                for content in result.content:
+                    if hasattr(content, "text"):
+                        summary += content.text
+                    elif hasattr(content, "data"):
+                        data = content.data
+
+                return FabricResult(
+                    success=True,
+                    data=data or {"raw_response": summary},
+                    summary=summary or str(data),
+                )
+
     except Exception as e:
         logger.error(f"Fabric agent error: {e}")
         return FabricResult(success=False, error=str(e))
