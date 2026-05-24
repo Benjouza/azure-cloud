@@ -3,6 +3,7 @@ Agentic Supply Chain Orchestrator – Routing and Synthesis
 Core logic: classify queries, dispatch to tools, synthesize grounded answers.
 """
 from __future__ import annotations
+import logging
 import re
 from typing import Optional
 
@@ -15,6 +16,8 @@ from .models import (
 from .tools.fabric_tool import query_fabric_agent
 from .tools.knowledge_tool import query_foundry_iq
 from .tools.synthesis import synthesize_response
+
+logger = logging.getLogger(__name__)
 
 
 # Keywords that suggest structured data queries (Fabric)
@@ -71,15 +74,26 @@ async def handle_query(user_query: str, user_context: dict | None = None) -> Syn
     """
     user_context = user_context or {}
     route = classify_query(user_query)
+    logger.info(f"Query classified as '{route.route}': {route.reasoning}")
 
     fabric_result: Optional[FabricResult] = None
     kb_result: Optional[KnowledgeResult] = None
 
     if route.route in ("structured", "mixed"):
-        fabric_result = await query_fabric_agent(user_query, user_context)
+        try:
+            fabric_result = await query_fabric_agent(user_query, user_context)
+            logger.info(f"Fabric result: success={fabric_result.success}, summary_len={len(fabric_result.summary)}")
+        except Exception as e:
+            logger.error(f"Fabric tool exception: {e}", exc_info=True)
+            fabric_result = FabricResult(success=False, error=str(e))
 
     if route.route in ("knowledge", "mixed"):
-        kb_result = await query_foundry_iq(user_query, user_context)
+        try:
+            kb_result = await query_foundry_iq(user_query, user_context)
+            logger.info(f"Knowledge result: success={kb_result.success}, docs={len(kb_result.documents)}")
+        except Exception as e:
+            logger.error(f"Knowledge tool exception: {e}", exc_info=True)
+            kb_result = KnowledgeResult(success=False, error=str(e))
 
     return synthesize_response(
         question=user_query,

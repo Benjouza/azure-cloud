@@ -77,36 +77,154 @@ async def query_foundry_iq(question: str, user_context: dict) -> KnowledgeResult
         )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                endpoint,
-                json={
-                    "query": question,
-                    "top_k": 5,
-                    "context": user_context,
-                },
-                headers={"Content-Type": "application/json"},
-            )
-            response.raise_for_status()
-            data = response.json()
+        from azure.identity import DefaultAzureCredential
+        credential = DefaultAzureCredential()
+        token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-            documents = data.get("documents", data.get("results", []))
-            summary = data.get("summary", "")
-            if not summary and documents:
-                summary_parts = [
-                    f"• {doc.get('title', 'Document')}: {doc.get('excerpt', '')[:100]}..."
-                    for doc in documents[:5]
-                ]
-                summary = "Retrieved documents:\n" + "\n".join(summary_parts)
+        mcp_url = endpoint
+        auth_headers = {
+            "Authorization": f"Bearer {token.token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Step 1: Initialize MCP session
+            init_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "orchestrator-agent", "version": "0.1.0"},
+                    },
+                },
+                headers=auth_headers,
+            )
+            logger.info(
+                f"Foundry IQ MCP initialize: status={init_resp.status_code}, "
+                f"body={init_resp.text[:500]}"
+            )
+            if init_resp.status_code >= 400:
+                return KnowledgeResult(
+                    success=False,
+                    error=f"Foundry IQ MCP initialize failed ({init_resp.status_code}): {init_resp.text[:500]}",
+                )
+
+            session_id = init_resp.headers.get("mcp-session-id", "")
+            session_headers = {**auth_headers}
+            if session_id:
+                session_headers["Mcp-Session-Id"] = session_id
+
+            # Step 2: Send initialized notification
+            await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                },
+                headers=session_headers,
+            )
+
+            # Step 3: List available tools
+            tools_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers=session_headers,
+            )
+            logger.info(f"Foundry IQ MCP tools/list: status={tools_resp.status_code}, body={tools_resp.text[:500]}")
+
+            if tools_resp.status_code >= 400:
+                return KnowledgeResult(
+                    success=False,
+                    error=f"Foundry IQ MCP tools/list failed ({tools_resp.status_code}): {tools_resp.text[:500]}",
+                )
+
+            tools_data = tools_resp.json()
+            tools = tools_data.get("result", {}).get("tools", [])
+            tool_names = [t["name"] for t in tools]
+            logger.info(f"Foundry IQ MCP tools available: {tool_names}")
+
+            # Step 4: Call the appropriate tool
+            target_tool = None
+            for candidate in ["search", "query", "retrieve", "ask", "knowledge_search"]:
+                if candidate in tool_names:
+                    target_tool = candidate
+                    break
+            if not target_tool and tool_names:
+                target_tool = tool_names[0]
+
+            if not target_tool:
+                return KnowledgeResult(success=False, error=f"No usable tools found. Available: {tool_names}")
+
+            call_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": target_tool,
+                        "arguments": {"question": question},
+                    },
+                },
+                headers=session_headers,
+            )
+            logger.info(f"Foundry IQ MCP tools/call: status={call_resp.status_code}, body={call_resp.text[:500]}")
+
+            if call_resp.status_code >= 400:
+                return KnowledgeResult(
+                    success=False,
+                    error=f"Foundry IQ tool call failed ({call_resp.status_code}): {call_resp.text[:500]}",
+                )
+
+            call_data = call_resp.json()
+            result_content = call_data.get("result", {}).get("content", [])
+
+            documents = []
+            summary_parts = []
+            for item in result_content:
+                if item.get("type") == "text":
+                    text = item.get("text", "")
+                    summary_parts.append(text)
+                    documents.append({
+                        "source": "foundry-iq",
+                        "title": "Knowledge Result",
+                        "excerpt": text,
+                    })
+                elif item.get("type") == "resource":
+                    resource = item.get("resource", {})
+                    documents.append({
+                        "source": resource.get("uri", "foundry-iq"),
+                        "title": resource.get("name", "Document"),
+                        "excerpt": resource.get("text", str(resource)),
+                    })
+
+            summary = "\n".join(summary_parts) if summary_parts else str(call_data)
 
             return KnowledgeResult(
                 success=True,
                 documents=documents,
                 summary=summary,
             )
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Foundry IQ HTTP error: {e.response.status_code}")
-        return KnowledgeResult(success=False, error=f"HTTP {e.response.status_code}: {e.response.text}")
-    except Exception as e:
-        logger.error(f"Foundry IQ error: {e}")
-        return KnowledgeResult(success=False, error=str(e))
+
+    except BaseException as e:
+        root_cause = e
+        if hasattr(e, "exceptions"):
+            root_cause = e.exceptions[0] if e.exceptions else e
+        detail = str(root_cause)
+        if hasattr(root_cause, "response"):
+            try:
+                detail += f" | Body: {root_cause.response.text}"
+            except Exception:
+                pass
+        logger.error(f"Foundry IQ error: {detail}", exc_info=root_cause)
+        return KnowledgeResult(success=False, error=detail)
