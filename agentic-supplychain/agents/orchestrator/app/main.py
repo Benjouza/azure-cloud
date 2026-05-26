@@ -1,153 +1,85 @@
 """
-Agentic Supply Chain Orchestrator – FastAPI Entrypoint
-Serves the orchestrator as an HTTP service for local testing
-and as the hosted agent container entrypoint.
-
-Implements the Foundry Hosted Agent "invocations" protocol:
-  - GET  /readiness        → 200 when ready
-  - POST /invocations      → execute agent logic
-  - GET  /invocations/docs/openapi.json → OpenAPI spec
+Agentic Supply Chain Orchestrator – Hosted Agent Entrypoint
+Uses the official azure-ai-agentserver-invocations SDK to implement
+the Foundry Hosted Agent "invocations" protocol.
 """
-import uuid
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import json
+import logging
+import sys
 
-from .config import settings
-from .models import QueryRequest, SynthesizedResponse, HealthResponse
+from azure.ai.agentserver.invocations import InvocationAgentServerHost
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+
+# Configure logging to output to stdout
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
+
 from .orchestrator import handle_query
 
-app = FastAPI(
-    title="Agentic Supply Chain Orchestrator",
-    description="Hosted agent orchestrator that combines Fabric structured data with Foundry IQ knowledge.",
-    version="0.1.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Create the invocations host server (handles /readiness, session, etc.)
+app = InvocationAgentServerHost()
 
 
-@app.get("/readiness")
-async def readiness():
-    """Readiness probe for Foundry hosted agent platform."""
-    return {"status": "ready"}
+@app.invoke_handler
+async def handle_invoke(request: Request) -> Response:
+    """Handle an invocation request from the Foundry platform."""
+    data = await request.json()
+    session_id: str = request.state.session_id
 
-
-@app.get("/health", response_model=HealthResponse)
-async def health():
-    """Health check endpoint for container probes."""
-    return HealthResponse(
-        status="ok",
-        agent_name=settings.agent_name,
-        version="0.1.0",
+    # Extract user message — SDK convention uses "message",
+    # but also support "input" for flexibility
+    user_message = (
+        data.get("message")
+        or data.get("input")
+        or data.get("question")
+        or data.get("content", "")
     )
 
+    if not user_message:
+        return Response(content="Missing 'message' in request", status_code=400)
 
-@app.post("/invocations")
-async def invocations(request: Request):
-    """
-    Foundry Invocations protocol endpoint.
-    Accepts {"input": "user question"} or {"question": "..."} payloads.
-    """
-    import json
-    import re
-    import logging
-
-    raw_body = await request.body()
-    content_type = request.headers.get("content-type", "")
-    body_text = raw_body.decode("utf-8", errors="replace").strip()
-
-    # Platform may send text/plain with trailing quotes or whitespace — clean up
-    body_text = body_text.strip("'\"` \t\n\r")
-
-    body = None
-    # Try parsing as JSON (may have been wrapped in quotes or have trailing chars)
-    for candidate in [body_text, raw_body]:
-        try:
-            body = json.loads(candidate)
-            break
-        except (json.JSONDecodeError, ValueError, TypeError):
-            continue
-
-    if body is None:
-        # Try to find JSON object within the text
-        json_match = re.search(r'\{[^{}]*\}', body_text)
-        if json_match:
-            try:
-                body = json.loads(json_match.group(0))
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    if body is None:
-        # Last resort: extract input value with regex
-        logging.getLogger(__name__).warning(
-            f"Non-standard request body. Content-Type: {content_type}, "
-            f"Body (first 500 chars): {body_text[:500]}"
-        )
-        match = re.search(r'"input"\s*:\s*"([^"]+)"', body_text)
-        if match:
-            body = {"input": match.group(1)}
-        else:
-            # Treat the entire body as the user's question
-            body = {"input": body_text}
-
-    # Extract the user question from various payload formats
-    question = (
-        body.get("input")
-        or body.get("question")
-        or body.get("message")
-        or body.get("content", "")
-    )
-    user_context = body.get("user_context", body.get("context", {}))
-
-    invocation_id = request.headers.get(
-        "x-agent-invocation-id", str(uuid.uuid4())
-    )
-
-    logging.getLogger(__name__).info(
-        f"Invocation {invocation_id}: extracted question={question[:200]!r}, "
-        f"route will be determined by orchestrator"
-    )
+    print(f"=== INVOCATION ===")
+    print(f"Session: {session_id}")
+    print(f"Message: {user_message!r}")
 
     try:
-        result = await handle_query(user_query=question, user_context=user_context)
+        result = await handle_query(user_query=user_message, user_context={})
     except Exception as e:
-        logging.getLogger(__name__).error(f"Invocation {invocation_id}: handle_query failed: {e}", exc_info=True)
+        logging.getLogger(__name__).error(f"handle_query failed: {e}", exc_info=True)
         return JSONResponse(
-            status_code=500,
-            content={
-                "invocation_id": invocation_id,
-                "status": "error",
-                "error": str(e),
+            {
+                "status": "failed",
+                "error": {"type": "server_error", "message": f"Error processing request: {str(e)}"},
             },
-            headers={"x-agent-invocation-id": invocation_id},
+            status_code=500,
         )
 
-    output = result.model_dump()
-    logging.getLogger(__name__).info(
-        f"Invocation {invocation_id}: completed, route={output.get('route')}, "
-        f"findings_len={len(output.get('findings', ''))}, "
-        f"actions_count={len(output.get('recommended_actions', []))}"
-    )
-
-    # Format a human-readable response for the platform chat UI
+    # Format human-readable response
     response_text = _format_response_text(result)
 
-    return JSONResponse(
-        content={
-            "invocation_id": invocation_id,
-            "status": "completed",
-            "output": response_text,
-        },
-        headers={
-            "x-agent-invocation-id": invocation_id,
-        },
-    )
+    print(f"=== RESPONSE ===")
+    print(f"Route: {result.route}")
+    print(f"Text: {response_text[:500]}")
+    print(f"=== END ===")
+
+    # Foundry Playground UI expects the OpenAI Responses API format
+    return JSONResponse({
+        "status": "completed",
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": response_text}
+                ],
+            }
+        ],
+    })
 
 
 def _format_response_text(result) -> str:
@@ -174,22 +106,5 @@ def _format_response_text(result) -> str:
     return "\n\n".join(parts)
 
 
-@app.post("/query", response_model=SynthesizedResponse)
-async def query(request: QueryRequest):
-    """
-    Accept a business question, route to appropriate tools,
-    and return a synthesized grounded answer.
-    """
-    return await handle_query(
-        user_query=request.question,
-        user_context=request.user_context,
-    )
-
-
 if __name__ == "__main__":
-    uvicorn.run(
-        "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=True,
-    )
+    app.run()

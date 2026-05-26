@@ -54,62 +54,169 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
 
     try:
         from azure.identity import DefaultAzureCredential
-        from mcp import ClientSession
-        from mcp.client.sse import sse_client
+        import httpx
 
         credential = DefaultAzureCredential()
         token = credential.get_token("https://api.fabric.microsoft.com/.default")
 
-        headers = {"Authorization": f"Bearer {token.token}"}
+        mcp_url = endpoint
+        auth_headers = {
+            "Authorization": f"Bearer {token.token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
 
-        async with sse_client(endpoint, headers=headers) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-
-                # List available tools to find the query/chat tool
-                tools_result = await session.list_tools()
-                tool_names = [t.name for t in tools_result.tools]
-                logger.info(f"Fabric MCP tools available: {tool_names}")
-
-                # Call the appropriate tool — Fabric data agents typically expose
-                # "query" or "ask" or similar; try common names
-                target_tool = None
-                for candidate in ["query", "ask", "chat", "execute_query", "run_query"]:
-                    if candidate in tool_names:
-                        target_tool = candidate
-                        break
-
-                if not target_tool and tool_names:
-                    # Fall back to first available tool
-                    target_tool = tool_names[0]
-                    logger.info(f"Using first available tool: {target_tool}")
-
-                if not target_tool:
-                    return FabricResult(
-                        success=False,
-                        error="No tools available on Fabric MCP agent",
-                    )
-
-                result = await session.call_tool(
-                    target_tool,
-                    arguments={"question": question},
-                )
-
-                # Extract text content from MCP result
-                summary = ""
-                data = {}
-                for content in result.content:
-                    if hasattr(content, "text"):
-                        summary += content.text
-                    elif hasattr(content, "data"):
-                        data = content.data
-
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Step 1: Initialize MCP session
+            init_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "orchestrator-agent", "version": "0.1.0"},
+                    },
+                },
+                headers=auth_headers,
+            )
+            logger.info(
+                f"Fabric MCP initialize: status={init_resp.status_code}, "
+                f"body={init_resp.text[:500]}"
+            )
+            if init_resp.status_code >= 400:
                 return FabricResult(
-                    success=True,
-                    data=data or {"raw_response": summary},
-                    summary=summary or str(data),
+                    success=False,
+                    error=f"Fabric MCP initialize failed ({init_resp.status_code}): {init_resp.text[:500]}",
                 )
 
-    except Exception as e:
-        logger.error(f"Fabric agent error: {e}")
-        return FabricResult(success=False, error=str(e))
+            init_data = init_resp.json()
+            session_id = init_resp.headers.get("mcp-session-id", "")
+            session_headers = {**auth_headers}
+            if session_id:
+                session_headers["Mcp-Session-Id"] = session_id
+
+            # Step 2: Send initialized notification
+            await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized",
+                },
+                headers=session_headers,
+            )
+
+            # Step 3: List available tools
+            tools_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                },
+                headers=session_headers,
+            )
+            logger.info(f"Fabric MCP tools/list: status={tools_resp.status_code}, body={tools_resp.text[:500]}")
+
+            if tools_resp.status_code >= 400:
+                return FabricResult(
+                    success=False,
+                    error=f"Fabric MCP tools/list failed ({tools_resp.status_code}): {tools_resp.text[:500]}",
+                )
+
+            tools_data = tools_resp.json()
+            tools = tools_data.get("result", {}).get("tools", [])
+            tool_names = [t["name"] for t in tools]
+            logger.info(f"Fabric MCP tools available: {tool_names}")
+
+            # Step 4: Call the appropriate tool with correct argument name
+            target_tool = None
+            target_tool_schema = {}
+            for candidate in [
+                "DataAgent_supplychain_data_agent",
+                "query", "ask", "chat", "execute_query", "run_query",
+            ]:
+                if candidate in tool_names:
+                    target_tool = candidate
+                    target_tool_schema = next((t.get("inputSchema", {}) for t in tools if t["name"] == candidate), {})
+                    break
+            if not target_tool and tool_names:
+                target_tool = tool_names[0]
+                target_tool_schema = tools[0].get("inputSchema", {})
+
+            if not target_tool:
+                return FabricResult(success=False, error=f"No usable tools found. Available: {tool_names}")
+
+            # Determine the correct argument name from the tool's input schema
+            schema_props = target_tool_schema.get("properties", {})
+            if "userQuestion" in schema_props:
+                tool_arguments = {"userQuestion": question}
+            elif "query" in schema_props:
+                tool_arguments = {"query": question}
+            else:
+                # Default: use the first required field or "question"
+                required = target_tool_schema.get("required", [])
+                arg_name = required[0] if required else "question"
+                tool_arguments = {arg_name: question}
+
+            logger.info(f"Fabric MCP calling tool '{target_tool}' with args: {tool_arguments}")
+
+            call_resp = await client.post(
+                mcp_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": target_tool,
+                        "arguments": tool_arguments,
+                    },
+                },
+                headers=session_headers,
+            )
+            import json as _json
+            logger.info(
+                f"Fabric MCP tools/call: status={call_resp.status_code}\n"
+                f"Response JSON:\n{_json.dumps(call_resp.json(), indent=2, default=str)}"
+            )
+
+            if call_resp.status_code >= 400:
+                return FabricResult(
+                    success=False,
+                    error=f"Fabric tool call failed ({call_resp.status_code}): {call_resp.text[:500]}",
+                )
+
+            call_data = call_resp.json()
+            result_content = call_data.get("result", {}).get("content", [])
+
+            summary = ""
+            data = {}
+            for item in result_content:
+                if item.get("type") == "text":
+                    summary += item.get("text", "")
+                elif item.get("type") == "resource":
+                    data = item.get("resource", {})
+
+            return FabricResult(
+                success=True,
+                data=data or {"raw_response": summary},
+                summary=summary or str(call_data),
+            )
+
+    except BaseException as e:
+        # MCP client wraps errors in ExceptionGroup/TaskGroup — unwrap
+        root_cause = e
+        if hasattr(e, "exceptions"):
+            root_cause = e.exceptions[0] if e.exceptions else e
+        # Log response body if available (for HTTP errors)
+        detail = str(root_cause)
+        if hasattr(root_cause, "response"):
+            try:
+                detail += f" | Body: {root_cause.response.text}"
+            except Exception:
+                pass
+        logger.error(f"Fabric agent error: {detail}", exc_info=root_cause)
+        return FabricResult(success=False, error=detail)
