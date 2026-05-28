@@ -87,7 +87,7 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
                     "params": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {},
-                        "clientInfo": {"name": "orchestrator-agent", "version": "0.1.0"},
+                        "clientInfo": {"name": "supplychain-orchestrator-agent", "version": "0.1.0"},
                     },
                 },
                 headers=auth_headers,

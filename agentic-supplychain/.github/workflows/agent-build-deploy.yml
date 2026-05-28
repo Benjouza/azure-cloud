@@ -52,4 +52,4 @@ jobs:
           AZURE_AI_PROJECT_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
           MODEL_DEPLOYMENT_NAME: ${{ vars.MODEL_DEPLOYMENT_NAME }}
           AGENT_IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/orchestrator:${{ github.sha }}
-          AGENT_NAME: ${{ vars.AGENT_NAME || 'orchestrator-agent' }}
+          AGENT_NAME: ${{ vars.AGENT_NAME || 'supplychain-orchestrator-agent' }}

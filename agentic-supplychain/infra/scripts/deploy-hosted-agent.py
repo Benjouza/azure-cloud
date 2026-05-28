@@ -10,7 +10,7 @@ Required environment variables:
   AZURE_AI_PROJECT_ENDPOINT  – Foundry project endpoint (from Bicep output)
   MODEL_DEPLOYMENT_NAME      – LLM model deployment name (from Step 3)
   AGENT_IMAGE                – Full ACR image ref, e.g., myacr.azurecr.io/orchestrator:latest
-  AGENT_NAME                 – Display name for the agent (default: orchestrator-agent)
+  AGENT_NAME                 – Display name for the agent (default: supplychain-orchestrator-agent)
 
 Optional:
   FABRIC_DATA_AGENT_ENDPOINT – Fabric data agent endpoint (from Fabric portal)
@@ -36,7 +36,7 @@ def main():
     endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
     model = os.environ.get("MODEL_DEPLOYMENT_NAME", "")
     image = os.environ.get("AGENT_IMAGE", "")
-    agent_name = os.environ.get("AGENT_NAME", "orchestrator-agent")
+    agent_name = os.environ.get("AGENT_NAME", "supplychain-orchestrator-agent")
 
     missing = []
     if not endpoint:

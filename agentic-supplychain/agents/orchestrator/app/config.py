@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     appinsights_connection_string: str = Field(default="", description="App Insights connection string")
 
     # Agent identity
-    agent_name: str = Field(default="orchestrator-agent", description="Display name for the hosted agent")
+    agent_name: str = Field(default="supplychain-orchestrator-agent", description="Display name for the hosted agent")
 
     # Server settings
     host: str = Field(default="0.0.0.0", description="Server bind host")
