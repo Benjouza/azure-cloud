@@ -15,6 +15,15 @@ from ..models import FabricResult
 
 logger = logging.getLogger(__name__)
 
+_AUTH_ERROR_HINTS = (
+    "authorization",
+    "unauthorized",
+    "forbidden",
+    "permission",
+    "access denied",
+    "not allowed",
+)
+
 # Mock data for local development when Fabric is not connected
 _MOCK_FABRIC_RESPONSE = {
     "suppliers_with_delays": [
@@ -65,6 +74,7 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
+        logger.info("Fabric token acquired for scope https://api.fabric.microsoft.com/.default")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Step 1: Initialize MCP session
@@ -84,7 +94,7 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
             )
             logger.info(
                 f"Fabric MCP initialize: status={init_resp.status_code}, "
-                f"body={init_resp.text[:500]}"
+                f"headers={dict(init_resp.headers)}, body={init_resp.text[:500]}"
             )
             if init_resp.status_code >= 400:
                 return FabricResult(
@@ -178,6 +188,7 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
                 headers=session_headers,
             )
             import json as _json
+            response_json = call_resp.json()
             logger.info(
                 f"Fabric MCP tools/call: status={call_resp.status_code}\n"
                 f"Response JSON:\n{_json.dumps(call_resp.json(), indent=2, default=str)}"
@@ -189,8 +200,9 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
                     error=f"Fabric tool call failed ({call_resp.status_code}): {call_resp.text[:500]}",
                 )
 
-            call_data = call_resp.json()
+            call_data = response_json
             result_content = call_data.get("result", {}).get("content", [])
+            tool_reported_error = call_data.get("result", {}).get("isError", False)
 
             summary = ""
             data = {}
@@ -199,6 +211,18 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
                     summary += item.get("text", "")
                 elif item.get("type") == "resource":
                     data = item.get("resource", {})
+
+            if tool_reported_error or _looks_like_auth_error(summary):
+                logger.error(
+                    "Fabric tool returned an authorization or tool error: %s",
+                    summary[:1000],
+                )
+                return FabricResult(
+                    success=False,
+                    error=summary or str(call_data),
+                    data=data,
+                    summary=summary,
+                )
 
             return FabricResult(
                 success=True,
@@ -220,3 +244,9 @@ async def query_fabric_agent(question: str, user_context: dict) -> FabricResult:
                 pass
         logger.error(f"Fabric agent error: {detail}", exc_info=root_cause)
         return FabricResult(success=False, error=detail)
+
+
+def _looks_like_auth_error(text: str) -> bool:
+    """Detect auth-style denial text returned as a normal MCP message."""
+    text_lower = text.lower()
+    return any(hint in text_lower for hint in _AUTH_ERROR_HINTS)

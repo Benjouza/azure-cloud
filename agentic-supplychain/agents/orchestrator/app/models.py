@@ -45,6 +45,7 @@ class SynthesizedResponse(BaseModel):
     policy_implications: str = Field(default="", description="Relevant policies, contracts, SLAs")
     recommended_actions: list[str] = Field(default_factory=list, description="Actionable next steps")
     supporting_evidence: list[str] = Field(default_factory=list, description="Source references and notes")
+    errors: list[str] = Field(default_factory=list, description="Tool and retrieval errors")
     raw_fabric: Optional[dict] = None
     raw_knowledge: Optional[list[dict]] = None
 

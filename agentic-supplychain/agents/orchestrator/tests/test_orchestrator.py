@@ -7,7 +7,7 @@ from httpx import AsyncClient, ASGITransport
 
 from app.orchestrator import classify_query, handle_query
 from app.models import QueryRoute, SynthesizedResponse
-from app.main import app
+from app.main import app, _classify_error_type, _format_response_text, _has_no_successful_content
 
 
 # ── Query Classification Tests ──────────────────────────────
@@ -101,6 +101,28 @@ class TestSynthesisFormatting:
         for action in result.recommended_actions:
             assert isinstance(action, str)
             assert len(action) > 10  # Not empty/trivial
+
+    def test_error_section_is_rendered(self):
+        result = SynthesizedResponse(
+            question="Which suppliers have the highest delay rates?",
+            route="structured",
+            errors=["Fabric: authorization issue while querying data service"],
+        )
+
+        text = _format_response_text(result)
+
+        assert "**Errors:**" in text
+        assert "authorization issue" in text
+
+    def test_error_only_result_is_detected(self):
+        result = SynthesizedResponse(
+            question="Which suppliers have the highest delay rates?",
+            route="structured",
+            errors=["Fabric: authorization issue while querying data service"],
+        )
+
+        assert _has_no_successful_content(result) is True
+        assert _classify_error_type(result.errors) == "tool_authorization_error"
 
 
 # ── API Endpoint Tests ──────────────────────────────────────

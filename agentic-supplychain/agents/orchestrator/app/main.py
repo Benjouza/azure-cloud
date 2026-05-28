@@ -59,6 +59,17 @@ async def handle_invoke(request: Request) -> Response:
             status_code=500,
         )
 
+    if result.errors and _has_no_successful_content(result):
+        return JSONResponse(
+            {
+                "status": "failed",
+                "error": {
+                    "type": _classify_error_type(result.errors),
+                    "message": "\n".join(result.errors),
+                },
+            }
+        )
+
     # Format human-readable response
     response_text = _format_response_text(result)
 
@@ -86,6 +97,10 @@ def _format_response_text(result) -> str:
     """Format SynthesizedResponse as readable text for the chat UI."""
     parts = []
 
+    if result.errors:
+        error_text = "\n".join(f"- {error}" for error in result.errors)
+        parts.append(f"**Errors:**\n{error_text}")
+
     if result.findings and result.findings != "No structured data available.":
         parts.append(f"**Findings:**\n{result.findings}")
 
@@ -104,6 +119,23 @@ def _format_response_text(result) -> str:
         return "I wasn't able to find relevant information for your question. Please try rephrasing."
 
     return "\n\n".join(parts)
+
+
+def _has_no_successful_content(result) -> bool:
+    """Return True when the invocation only contains tool errors and no useful answer content."""
+    return not any([
+        result.raw_fabric,
+        result.raw_knowledge,
+        result.supporting_evidence,
+    ])
+
+
+def _classify_error_type(errors: list[str]) -> str:
+    """Map tool errors to a stable invocation error type."""
+    combined = " ".join(errors).lower()
+    if any(token in combined for token in ("authorization", "unauthorized", "forbidden", "access denied")):
+        return "tool_authorization_error"
+    return "tool_error"
 
 
 if __name__ == "__main__":

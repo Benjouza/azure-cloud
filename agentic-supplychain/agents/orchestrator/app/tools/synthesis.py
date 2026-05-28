@@ -23,6 +23,7 @@ def synthesize_response(
     policy_implications = _extract_policy_implications(knowledge_result)
     actions = _derive_actions(fabric_result, knowledge_result)
     evidence = _collect_evidence(fabric_result, knowledge_result)
+    errors = _collect_errors(fabric_result, knowledge_result)
 
     return SynthesizedResponse(
         question=question,
@@ -31,6 +32,7 @@ def synthesize_response(
         policy_implications=policy_implications,
         recommended_actions=actions,
         supporting_evidence=evidence,
+        errors=errors,
         raw_fabric=fabric_result.data if fabric_result and fabric_result.success else None,
         raw_knowledge=[d for d in knowledge_result.documents] if knowledge_result and knowledge_result.success else None,
     )
@@ -118,3 +120,19 @@ def _collect_evidence(
             evidence.append(f"[{source}] {title}")
 
     return evidence
+
+
+def _collect_errors(
+    fabric_result: Optional[FabricResult],
+    knowledge_result: Optional[KnowledgeResult],
+) -> list[str]:
+    """Collect tool and retrieval errors for display and invocation status."""
+    errors = []
+
+    if fabric_result and not fabric_result.success and fabric_result.error:
+        errors.append(f"Fabric: {fabric_result.error}")
+
+    if knowledge_result and not knowledge_result.success and knowledge_result.error:
+        errors.append(f"Knowledge: {knowledge_result.error}")
+
+    return errors
