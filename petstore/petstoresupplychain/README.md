@@ -166,7 +166,7 @@ petstoresupplychain/
 **Azure requirements:**
 - Azure subscription with **Contributor** + **User Access Administrator** roles
 - Microsoft Entra ID tenant
-- Microsoft Fabric capacity (**F2+** or **P1+**)
+- Microsoft Fabric capacity (**P2** recommended — see Phase 4 for provisioning)
 
 ---
 
@@ -271,15 +271,53 @@ Add to `.env`:
 MODEL_DEPLOYMENT_NAME=gpt-4o
 ```
 
+#### Fix: "You don't have permission to use the chat preview"
+
+After deploying the model, you may see this error in the Foundry playground:
+
+> *"You don't have permission to use the chat preview. Contact your admin to enable key authentication or Microsoft Entra ID authentication for your account."*
+
+**To resolve**, assign yourself the required roles on the Foundry account:
+
+```bash
+source .env
+source .env.generated
+
+# Get your user Object ID
+USER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
+
+# Grant Cognitive Services OpenAI User (required to use the playground & call models)
+az role assignment create \
+  --assignee "$USER_OBJECT_ID" \
+  --role "Cognitive Services OpenAI User" \
+  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+
+# Grant Azure AI Developer (required to manage agents)
+az role assignment create \
+  --assignee "$USER_OBJECT_ID" \
+  --role "Azure AI Developer" \
+  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+
+# Grant Azure AI Administrator (required to build agents in the project)
+az role assignment create \
+  --assignee "$USER_OBJECT_ID" \
+  --role "Azure AI Administrator" \
+  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+```
+
+> 💡 Role assignments can take **1–5 minutes** to propagate. Refresh the Foundry playground after waiting.
+
 ---
 
 ### Phase 3: Enable Capability Host
 
-Required before any hosted agent can be deployed:
+Required before any hosted agent can be deployed **and before the Foundry playground will work**. Without this, you'll see: *"You don't have permission to use the chat preview. Contact your admin to enable key authentication or Microsoft Entra ID authentication."*
 
 ```bash
 bash infra/scripts/postprovision-capability-host.sh
 ```
+
+This creates the Agents capability host on your Foundry account. Wait **2–3 minutes** for provisioning to complete before using the playground.
 
 If the script fails, follow the portal fallback:
 1. Azure Portal → AI Foundry account `petstoresupplychain-foundry` → **Settings** → **Capability Host**
@@ -288,9 +326,51 @@ If the script fails, follow the portal fallback:
 
 ---
 
-### Phase 4: Microsoft Fabric – Workspace, Lakehouse & Data Agent
+### Phase 4: Microsoft Fabric – Capacity, Workspace, Lakehouse & Data Agent
 
 > ⚠️ **Manual Steps** — Fabric setup requires portal interaction.
+
+#### 4.0 Provision Fabric Capacity (P2)
+
+Before creating a Fabric workspace, you need a Fabric capacity provisioned in your Azure subscription. A **P2** SKU provides sufficient compute for the Lakehouse, Data Agent, and semantic model.
+
+**Option A: Azure Portal**
+1. Go to [Azure Portal](https://portal.azure.com) → search for **Microsoft Fabric**
+2. Click **+ Create** → **Fabric capacity**
+3. Configure:
+   - **Subscription:** your Azure subscription
+   - **Resource group:** `petstoresupplychain` (same as other resources)
+   - **Capacity name:** `petstoresupplychain-fabric`
+   - **Region:** same region as your other resources (e.g., `swedencentral`)
+   - **Size:** **P2** (16 Capacity Units — sufficient for Lakehouse + Data Agent)
+4. Click **Review + Create** → **Create**
+5. Wait for provisioning to complete (typically 2–5 minutes)
+
+**Option B: Azure CLI**
+```bash
+az fabric capacity create \
+  --resource-group petstoresupplychain \
+  --capacity-name petstoresupplychain-fabric \
+  --location swedencentral \
+  --sku-name P2 \
+  --sku-tier Fabric \
+  --administration-members "[\"yourname@yourdomain.com\"]"
+```
+
+> 💡 **Cost note:** P2 capacity incurs hourly charges (~$3/hr). You can **pause** it when not in use:
+> ```bash
+> # Pause (stop billing)
+> az fabric capacity suspend \
+>   --resource-group petstoresupplychain \
+>   --capacity-name petstoresupplychain-fabric
+>
+> # Resume when needed
+> az fabric capacity resume \
+>   --resource-group petstoresupplychain \
+>   --capacity-name petstoresupplychain-fabric
+> ```
+
+#### 4.1 Create Workspace & Load Data
 
 ```mermaid
 graph TD
@@ -312,7 +392,8 @@ graph TD
 1. **Create Workspace** — Go to [fabric.microsoft.com](https://app.fabric.microsoft.com)
    - Click **+ New workspace**
    - Name: `petstoresupplychain-fabric`
-   - Assign to F2+ or P1+ capacity
+   - Under **License mode**, select **Fabric capacity**
+   - Select your provisioned capacity: `petstoresupplychain-fabric (P2)`
 
 2. **Create Lakehouse** — In the workspace:
    - **+ New** → **Lakehouse**
@@ -332,23 +413,34 @@ graph TD
 
    To upload: Click **Get Data** → **Upload files** → select all CSVs → **Load to Tables**
 
-4. **Verify Tables** — Confirm all 7 tables load correctly in Lakehouse Explorer
+4. **Verify Tables** — In the Lakehouse Explorer (left sidebar):
+   - Expand **Tables** — you should see all 7 tables listed:
+     `incidents`, `inventory_positions`, `products`, `purchase_orders`, `shipments`, `suppliers`, `warehouses`
+   - Click on each table name to preview its data (top 100 rows)
+   - Verify row counts match the expected values above
+   - If a table is missing, re-upload the CSV: right-click **Tables** → **Load data** → **Upload file**
 
-5. **Create Semantic Model** — Select all tables and define relationships:
-   ```
-   suppliers.supplier_id       ──→  purchase_orders.supplier_id
-   products.product_id         ──→  purchase_orders.product_id
-   purchase_orders.po_id       ──→  shipments.po_id
-   products.product_id         ──→  inventory_positions.product_id
-   warehouses.warehouse_id     ──→  inventory_positions.warehouse_id
-   suppliers.supplier_id       ──→  incidents.supplier_id
-   ```
+5. **Create Semantic Model (Ontology)** — This is what the Data Agent uses as its data source:
+   - In the Lakehouse, click **New semantic model**
+   - Name: `petstoresupplychain_ontology`
+   - Select **all 7 tables** to include in the model
+   - Define relationships between tables:
+     ```
+     suppliers.supplier_id       ──→  purchase_orders.supplier_id
+     products.product_id         ──→  purchase_orders.product_id
+     purchase_orders.po_id       ──→  shipments.po_id
+     products.product_id         ──→  inventory_positions.product_id
+     warehouses.warehouse_id     ──→  inventory_positions.warehouse_id
+     suppliers.supplier_id       ──→  incidents.supplier_id
+     ```
+   - Save the semantic model
 
-6. **Create Data Agent** — In workspace:
+6. **Create Data Agent (from Ontology)** — In workspace:
    - **+ New** → **Data Agent** (preview)
    - Name: `petstoresupplychain-fabric-data-agent`
-   - Data source: the Lakehouse or semantic model
-   - Enable natural language queries, include all tables
+   - **Data source: select the semantic model** `petstoresupplychain_ontology` (not the raw Lakehouse)
+   - The ontology gives the agent relationship awareness so it can join across tables correctly
+   - Enable natural language queries
    - **Test**: *"Which pet food products are below reorder point?"*
    - **Publish** the agent
 
@@ -479,7 +571,9 @@ az role assignment create \
 
 ---
 
-### Phase 8: Deploy the Orchestrator Agent
+### Phase 8: Configure & Deploy the Agent in Azure AI Foundry
+
+#### 8.1 Deploy via CLI (Programmatic)
 
 ```bash
 cd petstore/petstoresupplychain
@@ -492,6 +586,112 @@ python deploy_foundry_agent.py \
   --agent-name petstoresupplychain-orchestrator-agent \
   --prune-old-versions --keep 3
 ```
+
+#### 8.2 Configure via Azure AI Foundry Portal
+
+If you prefer portal-based setup or need to verify the agent configuration:
+
+1. **Navigate to your project:**
+   - Go to [ai.azure.com](https://ai.azure.com)
+   - Select project: **petstoresupplychain-foundryproject**
+
+2. **Create the Agent:**
+   - Go to **Agents** → **+ New Agent**
+   - Name: `petstoresupplychain-orchestrator-agent`
+   - Model: `gpt-4o` (select your deployed model)
+   - Paste the system instructions from `src/agent.py` → `SYSTEM_INSTRUCTIONS`
+
+3. **Add the Fabric Data Agent Tool:**
+   - In the agent configuration, click **+ Add Tool**
+   - Select **Microsoft Fabric (Preview)**
+   - Connection: `petstoresupplychain-fabric-data-agent`
+   - This routes data queries (inventory, orders, shipments) to your Fabric Lakehouse
+
+4. **Add the Azure AI Search Tool:**
+   - Click **+ Add Tool** again
+   - Select **Azure AI Search**
+   - Connection: select your AI Search connection
+   - Index name: `petstoresupplychain-ai-search`
+   - Query type: **Semantic**
+   - Top K: `5`
+   - This routes policy/knowledge queries to your indexed documents
+
+5. **Test in Playground:**
+   - Use the built-in chat playground to verify the agent works
+   - Try: *"What pet products are below reorder point?"* → should invoke Fabric
+   - Try: *"What is our expedited shipping policy?"* → should invoke AI Search
+   - Try: *"Which suppliers are under review and what's the escalation process?"* → should invoke both tools
+
+6. **Publish the Agent Version:**
+   - Once satisfied, click **Publish** to create a versioned deployment
+   - Note the agent version ID for production use
+
+#### 8.3 Running in Azure AI Foundry Agent Service (Cloud-Hosted)
+
+The agent runs as a **hosted agent** in the Foundry Agent Service — no container or VM required:
+
+```mermaid
+graph LR
+    subgraph FoundryService["Azure AI Foundry Agent Service"]
+        AV["petstoresupplychain-orchestrator-agent<br/>(Published Version)"]
+        RT["Agent Runtime<br/>(managed by Foundry)"]
+    end
+
+    subgraph Tools["Connected Tools"]
+        F["petstoresupplychain-fabric-data-agent<br/>(Fabric connection)"]
+        S["petstoresupplychain-ai-search<br/>(Search connection)"]
+    end
+
+    Client["Client App / API"] -->|"responses.create()<br/>agent_reference"| AV
+    AV --> RT
+    RT --> F
+    RT --> S
+    AV -->|"grounded response"| Client
+```
+
+**How it works:**
+- The agent is deployed as a **PromptAgentDefinition** with model, instructions, and tools
+- Foundry Agent Service hosts and manages the agent runtime (no infrastructure to maintain)
+- Clients call it via the OpenAI-compatible `responses.create()` API with an `agent_reference`
+- The agent automatically routes to Fabric or AI Search based on intent classification
+
+**Calling the hosted agent from any client:**
+
+```python
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+credential = DefaultAzureCredential()
+project_client = AIProjectClient(
+    endpoint="<your-project-endpoint>",  # AZURE_AI_PROJECT_ENDPOINT
+    credential=credential,
+)
+
+openai_client = project_client.get_openai_client()
+
+# Create a conversation
+conversation = openai_client.conversations.create()
+
+# Send a message to the hosted agent
+response = openai_client.responses.create(
+    input="What pet food products are running low on stock?",
+    conversation=conversation.id,
+    extra_body={
+        "agent_reference": {
+            "name": "petstoresupplychain-orchestrator-agent",
+            "type": "agent_reference"
+        }
+    },
+)
+
+print(response.output_text)
+```
+
+**Monitoring in Foundry Portal:**
+- Go to **Agents** → select `petstoresupplychain-orchestrator-agent`
+- **Traces** tab: see all conversations, tool calls, and latency
+- **Sessions** tab: view active and historical sessions
+- **Metrics**: token usage, success rate, average latency
 
 ---
 
@@ -521,6 +721,8 @@ az login && az account set --subscription $AZURE_SUBSCRIPTION_ID
 # 5. Run interactive CLI
 python run.py
 ```
+
+> **Note:** Running locally still uses the **cloud-hosted agent** in Foundry. The local code creates a new agent version, opens a conversation, and sends messages to the Foundry Agent Service. It does NOT run the LLM locally.
 
 #### Run as HTTP Server
 
