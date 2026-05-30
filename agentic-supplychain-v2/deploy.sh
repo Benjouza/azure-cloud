@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# deploy.sh — Deploy a Foundry-hosted agent version (no Docker / no Container Apps)
+# Usage: ./deploy.sh [--agent-name <name>] [--prune-old-versions] [--keep <n>]
+set -euo pipefail
+
+if [[ -f .env ]]; then
+  set -a && source .env && set +a
+fi
+
+echo "=================================================="
+echo " Supply Chain Orchestrator — Foundry Hosted Deploy"
+echo " Agent : ${AGENT_NAME:-supplychain-orchestrator-agent-v2}"
+echo "=================================================="
+
+python deploy_foundry_agent.py "$@"
