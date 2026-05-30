@@ -1,0 +1,11 @@
+supplier_id,name,contact_email,region,country,category,lead_time_days,on_time_rate,quality_score,status
+SUP-001,PawsNatural Foods Co,orders@pawsnatural.com,Southeast,US,Pet Food,10,0.94,4.6,Active
+SUP-002,TailWag Logistics,fulfillment@tailwag.com,Northeast,US,Logistics,5,0.88,4.3,Active
+SUP-003,FurEver Toys Inc,supply@furevertoys.com,Northeast,US,Pet Toys,14,0.35,3.2,Under Review
+SUP-004,AquaPet Supplies,sales@aquapet.com,West,US,Aquarium & Fish,21,0.90,4.5,Active
+SUP-005,EuroPet GmbH,vertrieb@europet.de,Europe,DE,Pet Accessories,28,0.92,4.7,Active
+SUP-006,PetHealth Pharma,orders@pethealth.com,Southeast,US,Pet Health & Wellness,7,0.96,4.8,Active
+SUP-007,BarkWood Crafts Ltd,sourcing@barkwood.com,Northeast,US,Beds & Furniture,18,0.76,3.7,Active
+SUP-008,Feather & Fin Inc,sales@featherfin.com,Midwest,US,Bird & Small Animal,12,0.91,4.4,Active
+SUP-009,PremiumPaws Nutrition,procurement@premiumpaws.com,Northeast,US,Premium Pet Food,14,0.89,4.2,Active
+SUP-010,CleanPet Products Co,orders@cleanpet.com,West,US,Grooming & Hygiene,15,0.93,4.5,Active

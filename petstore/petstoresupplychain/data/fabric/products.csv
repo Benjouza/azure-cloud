@@ -1,0 +1,13 @@
+product_id,name,category,unit_cost,supplier_id,alternate_supplier_id,reorder_point,reorder_qty,lead_time_days,critical
+PRD-101,Organic Chicken Dog Food 30lb,Dog Food,42.00,SUP-001,SUP-009,100,500,10,true
+PRD-102,Grain-Free Salmon Cat Food 15lb,Cat Food,38.00,SUP-001,SUP-009,80,400,10,true
+PRD-110,Interactive Puzzle Feeder Dog Toy,Dog Toys,18.50,SUP-003,SUP-007,200,800,14,false
+PRD-111,Catnip Mouse Variety Pack (12pc),Cat Toys,12.00,SUP-003,,300,1200,14,false
+PRD-205,Orthopedic Memory Foam Dog Bed (L),Beds & Furniture,65.00,SUP-007,SUP-005,50,150,18,false
+PRD-206,Cat Tree Tower 72-inch Multi-Level,Beds & Furniture,125.00,SUP-007,,30,60,18,true
+PRD-301,Freshwater Aquarium Starter Kit 20gal,Aquarium,89.00,SUP-004,,40,100,21,false
+PRD-302,Tropical Fish Food Premium Flakes,Aquarium,8.50,SUP-004,,500,2000,21,false
+PRD-401,Flea and Tick Prevention Dog 6mo,Pet Health,45.00,SUP-006,,150,500,7,true
+PRD-402,Joint Health Supplement Chews 90ct,Pet Health,28.00,SUP-006,,200,600,7,true
+PRD-501,Professional Grooming Kit 7pc,Grooming,34.00,SUP-010,,100,400,15,false
+PRD-502,Deshedding Brush Large Breed,Grooming,22.00,SUP-010,,150,600,15,false

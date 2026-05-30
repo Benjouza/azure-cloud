@@ -1,0 +1,5 @@
+warehouse_id,name,region,city,state,capacity_sqft,type,manager,status
+WH-NE-01,Northeast Pet Distribution Center,Northeast,Newark,NJ,95000,Distribution,Sarah Chen,Active
+WH-SE-01,Southeast Pet Fulfillment Hub,Southeast,Atlanta,GA,78000,Fulfillment,Marcus Johnson,Active
+WH-W-01,West Coast Pet Warehouse,West,Portland,OR,85000,Storage,Lisa Patel,Active
+WH-MW-01,Midwest Pet Distribution Center,Midwest,Chicago,IL,72000,Distribution,David Kim,Active

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "swedencentral"
+    },
+    "baseName": {
+      "value": "petstoresupplychain"
+    },
+    "foundryAccountName": {
+      "value": "petstoresupplychain-foundry"
+    },
+    "foundryProjectName": {
+      "value": "petstoresupplychain-foundryproject"
+    },
+    "searchSku": {
+      "value": "basic"
+    },
+    "acrSku": {
+      "value": "Basic"
+    }
+  }
+}
