@@ -47,7 +47,7 @@ def deploy(agent_name: str) -> str:
             indexes=[
                 {
                     "project_connection_id": search_conn.id,
-                    "index_name": "petstoresupplychain-ai-search",
+                    "index_name": "petstoresupplychain-knowledge",
                     "query_type": AzureAISearchQueryType.SEMANTIC,
                     "top_k": 5,
                 }

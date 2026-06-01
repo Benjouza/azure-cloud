@@ -87,7 +87,7 @@ def create_orchestrator_agent():
             azure_ai_search=AzureAISearchToolResource(
                 indexes=[{
                     "project_connection_id": search_conn.id,
-                    "index_name": "petstoresupplychain-ai-search",
+                    "index_name": "petstoresupplychain-knowledge",
                     "query_type": AzureAISearchQueryType.SEMANTIC,
                     "top_k": 5,
                 }]

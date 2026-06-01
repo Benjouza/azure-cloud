@@ -12,4 +12,4 @@ echo " PetStore Supply Chain Orchestrator — Foundry Hosted Deploy"
 echo " Agent : ${AGENT_NAME:-petstoresupplychain-orchestrator-agent}"
 echo "=================================================="
 
-python deploy_foundry_agent.py "$@"
+python3 deploy_foundry_agent.py "$@"

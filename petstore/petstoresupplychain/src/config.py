@@ -4,7 +4,8 @@ import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(".env.generated")
+load_dotenv(".env", override=True)
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,6 @@ class Settings:
     agent_name: str = os.environ.get("AGENT_NAME", "petstoresupplychain-orchestrator-agent")
     search_endpoint: str = os.environ.get("SEARCH_ENDPOINT", "")
     fabric_data_agent_endpoint: str = os.environ.get("FABRIC_DATA_AGENT_ENDPOINT", "")
-    foundry_iq_mcp_url: str = os.environ.get("FOUNDRY_IQ_MCP_URL", "")
     appinsights_connection_string: str = os.environ.get("APPINSIGHTS_CONNECTION_STRING", "")
 
 

@@ -472,13 +472,35 @@ graph TD
 
 ### Phase 5: Knowledge Base – Azure AI Search
 
-#### Step 1: Index Knowledge Documents
+#### Step 1: Enable Entra ID Auth & Grant Yourself Access to AI Search
+
+The search service defaults to API-key-only auth. Enable Entra ID (RBAC) auth and assign yourself the required roles:
+
+```bash
+# Get your search service name
+SEARCH_NAME=$(grep SEARCH_ENDPOINT .env.generated | sed 's|.*https://||;s|\.search.*||')
+
+# Enable Entra ID + API key auth
+az search service update --name "$SEARCH_NAME" --resource-group petstoresupplychain \
+  --aad-auth-failure-mode http401WithBearerChallenge --auth-options aadOrApiKey
+
+# Assign yourself contributor roles
+USER_ID=$(az ad signed-in-user show --query id -o tsv)
+SEARCH_ID=$(az resource list --resource-group petstoresupplychain \
+  --resource-type "Microsoft.Search/searchServices" --query "[0].id" -o tsv)
+
+az role assignment create --assignee "$USER_ID" --role "Search Service Contributor" --scope "$SEARCH_ID"
+az role assignment create --assignee "$USER_ID" --role "Search Index Data Contributor" --scope "$SEARCH_ID"
+```
+
+> ⏳ Wait 1–2 minutes for RBAC propagation before proceeding.
+
+#### Step 2: Index Knowledge Documents
 
 Upload the petstore retail policy documents from `data/knowledge/` to Azure AI Search:
 
 ```bash
-# Ensure your .env and .env.generated are loaded
-python scripts/upload_search_documents.py
+python3 scripts/upload_search_documents.py
 ```
 
 This indexes 8 markdown files:
@@ -486,16 +508,13 @@ This indexes 8 markdown files:
 - **Procedures**: Shortage response playbook, warehouse receiving SOP
 - **Contracts**: FurEver Toys master agreement, BarkWood Crafts terms, TailWag Logistics SLA
 
-#### Step 2: Create Foundry Knowledge Base (Portal)
+#### Step 3: Create Foundry Knowledge Base (Portal)
 
 1. Go to [ai.azure.com](https://ai.azure.com) → project `petstoresupplychain-foundryproject` → **Knowledge Bases** → **+ New**
 2. Name: `petstoresupplychain-ai-search`
-3. Connect to your Azure AI Search service
-4. Select index: `petstoresupplychain-ai-search`
-5. Map fields: content → `content`, title → `title`, category → `category`
-6. Save and test: *"What is the penalty for late pet product deliveries?"*
-
-#### Step 3: Copy the MCP endpoint URL → set `FOUNDRY_IQ_MCP_URL` in `.env`
+3. Select the `petstoresupplychain-search-*` resource (the AI Search service created by Bicep)
+4. Select index: `petstoresupplychain-knowledge`
+5. Save
 
 ---
 
@@ -512,8 +531,6 @@ This creates:
 | Connection Name | Type | Target |
 |-----------------|------|--------|
 | `petstoresupplychain-fabric-data-agent` | RemoteTool | Fabric data agent endpoint |
-| `foundry-iq-mcp` | RemoteTool | Foundry IQ MCP endpoint |
-| `acr-connection` | ContainerRegistry | ACR login server |
 | `appinsights-connection` | ApplicationInsights | App Insights connection string |
 
 If SDK creation fails, the script prints portal instructions:
@@ -593,7 +610,64 @@ az role assignment create \
 
 ---
 
-### Phase 8: Configure & Deploy the Agent in Azure AI Foundry
+### Phase 8: Run Locally & Validate
+
+Test the agent locally before deploying to Foundry. The local code still uses the **cloud-hosted agent** in Foundry Agent Service — it creates a new agent version, opens a conversation, and sends messages to Foundry. It does NOT run the LLM locally.
+
+#### Setup Local Environment
+
+```bash
+# 1. Create virtual environment
+python3.11 -m venv .venv && source .venv/bin/activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Ensure .env has all required values
+cat .env
+# Should contain:
+#   AZURE_SUBSCRIPTION_ID=...
+#   AZURE_AI_PROJECT_ENDPOINT=...  (from .env.generated)
+#   MODEL_DEPLOYMENT_NAME=gpt-4o
+#   APPINSIGHTS_CONNECTION_STRING=... (from .env.generated)
+#   AGENT_NAME=petstoresupplychain-orchestrator-agent
+
+# 4. Authenticate to Azure
+az login && az account set --subscription $AZURE_SUBSCRIPTION_ID
+
+# 5. Run interactive CLI
+python run.py
+```
+
+#### Run as HTTP Server
+
+```bash
+pip install fastapi "uvicorn[standard]" pydantic
+uvicorn src.server:app --host 0.0.0.0 --port 8080 --reload
+```
+
+Test the API:
+```bash
+curl http://localhost:8080/health
+
+curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What pet food products are running low on stock?"}'
+```
+
+#### Test Queries
+
+| Query | Expected Tool | Expected Source |
+|-------|--------------|----------------|
+| *"What pet products are below reorder point in the Northeast warehouse?"* | Fabric | `inventory_positions` table |
+| *"What is our expedited shipping policy for pet food?"* | AI Search | `expedited_shipping_policy.md` |
+| *"Which suppliers are flagged for escalation and what's the procedure?"* | Both | `suppliers` + `supplier_escalation_runbook.md` |
+| *"How many dog toy orders are currently in transit?"* | Fabric | `purchase_orders` + `shipments` tables |
+| *"What are the penalty terms in the FurEver Toys contract?"* | AI Search | `apex_supplier_master_agreement.md` |
+
+---
+
+### Phase 9: Deploy the Agent to Azure AI Foundry
 
 #### 8.1 Deploy via CLI (Programmatic)
 
@@ -714,63 +788,6 @@ print(response.output_text)
 - **Traces** tab: see all conversations, tool calls, and latency
 - **Sessions** tab: view active and historical sessions
 - **Metrics**: token usage, success rate, average latency
-
----
-
-### Phase 9: Run Locally & Validate
-
-#### Setup Local Environment
-
-```bash
-# 1. Create virtual environment
-python3.11 -m venv .venv && source .venv/bin/activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Ensure .env has all required values
-cat .env
-# Should contain:
-#   AZURE_SUBSCRIPTION_ID=...
-#   AZURE_AI_PROJECT_ENDPOINT=...  (from .env.generated)
-#   MODEL_DEPLOYMENT_NAME=gpt-4o
-#   APPINSIGHTS_CONNECTION_STRING=... (from .env.generated)
-#   AGENT_NAME=petstoresupplychain-orchestrator-agent
-
-# 4. Authenticate to Azure
-az login && az account set --subscription $AZURE_SUBSCRIPTION_ID
-
-# 5. Run interactive CLI
-python run.py
-```
-
-> **Note:** Running locally still uses the **cloud-hosted agent** in Foundry. The local code creates a new agent version, opens a conversation, and sends messages to the Foundry Agent Service. It does NOT run the LLM locally.
-
-#### Run as HTTP Server
-
-```bash
-pip install fastapi "uvicorn[standard]" pydantic
-uvicorn src.server:app --host 0.0.0.0 --port 8080 --reload
-```
-
-Test the API:
-```bash
-curl http://localhost:8080/health
-
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What pet food products are running low on stock?"}'
-```
-
-#### Test Queries
-
-| Query | Expected Tool | Expected Source |
-|-------|--------------|----------------|
-| *"What pet products are below reorder point in the Northeast warehouse?"* | Fabric | `inventory_positions` table |
-| *"What is our expedited shipping policy for pet food?"* | AI Search | `expedited_shipping_policy.md` |
-| *"Which suppliers are flagged for escalation and what's the procedure?"* | Both | `suppliers` + `supplier_escalation_runbook.md` |
-| *"How many dog toy orders are currently in transit?"* | Fabric | `purchase_orders` + `shipments` tables |
-| *"What are the penalty terms in the FurEver Toys contract?"* | AI Search | `apex_supplier_master_agreement.md` |
 
 ---
 
