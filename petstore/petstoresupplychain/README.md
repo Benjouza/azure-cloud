@@ -271,13 +271,23 @@ Add to `.env`:
 MODEL_DEPLOYMENT_NAME=gpt-4o
 ```
 
-#### Fix: "You don't have permission to use the chat preview"
+#### Fix: "You don't have permission to use the chat preview" / "You don't have permission to build agents"
 
-After deploying the model, you may see this error in the Foundry playground:
+After deploying the model, you may see these errors in the Foundry playground:
 
 > *"You don't have permission to use the chat preview. Contact your admin to enable key authentication or Microsoft Entra ID authentication for your account."*
+>
+> *"You don't have permission to build agents in this project. To get access, please ask your administrator to assign you the Azure AI User role."*
 
-**To resolve**, assign yourself the required roles on the Foundry account:
+**To resolve**, add your user as **AI Developer** directly on the Foundry project via the portal:
+
+1. Go to [ai.azure.com](https://ai.azure.com) → select project **petstoresupplychain-foundryproject**
+2. Click **Management center** (gear icon) → **Overview** or **Project settings**
+3. Under **Members** / **Access control**, click **+ Add member**
+4. Search for your account and assign the **AI Developer** role
+5. Save — this resolves both the playground chat and agent builder permissions
+
+**Alternatively via CLI** (may take longer to propagate):
 
 ```bash
 source .env
@@ -286,23 +296,14 @@ source .env.generated
 # Get your user Object ID
 USER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
 
-# Grant Cognitive Services OpenAI User (required to use the playground & call models)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Cognitive Services OpenAI User" \
-  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+# The project is a sub-resource of the account
+PROJECT_SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME/projects/petstoresupplychain-foundryproject"
 
-# Grant Azure AI Developer (required to manage agents)
+# Grant Azure AI Developer on the project (fixes both errors)
 az role assignment create \
   --assignee "$USER_OBJECT_ID" \
   --role "Azure AI Developer" \
-  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
-
-# Grant Azure AI Administrator (required to build agents in the project)
-az role assignment create \
-  --assignee "$USER_OBJECT_ID" \
-  --role "Azure AI Administrator" \
-  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+  --scope "$PROJECT_SCOPE"
 ```
 
 > 💡 Role assignments can take **1–5 minutes** to propagate. Refresh the Foundry playground after waiting.
@@ -420,26 +421,47 @@ graph TD
    - Verify row counts match the expected values above
    - If a table is missing, re-upload the CSV: right-click **Tables** → **Load data** → **Upload file**
 
-5. **Create Semantic Model (Ontology)** — This is what the Data Agent uses as its data source:
-   - In the Lakehouse, click **New semantic model**
-   - Name: `petstoresupplychain_ontology`
-   - Select **all 7 tables** to include in the model
-   - Define relationships between tables:
-     ```
-     suppliers.supplier_id       ──→  purchase_orders.supplier_id
-     products.product_id         ──→  purchase_orders.product_id
-     purchase_orders.po_id       ──→  shipments.po_id
-     products.product_id         ──→  inventory_positions.product_id
-     warehouses.warehouse_id     ──→  inventory_positions.warehouse_id
-     suppliers.supplier_id       ──→  incidents.supplier_id
-     ```
-   - Save the semantic model
+5. **Create Ontology (Preview)** — This is what the Data Agent uses as its data source:
+
+   > **Prerequisite**: Your tenant admin must enable **Ontology item (preview)** in the Fabric Admin Portal → Tenant Settings.
+
+   a. In your workspace, click **+ New** → **Ontology (Preview)**
+   b. Name: `petstoresupplychain_ontology` → click **Create**
+   c. **Add Entity Types** — For each of your 7 tables, add an entity type:
+      - Click **+ Add entity type**
+      - Name it to match the table (e.g., `suppliers`, `products`, `purchase_orders`, etc.)
+      - Go to the **Bindings** tab → click **Add data to entity type**
+      - Select your Lakehouse → select the matching table
+      - Columns auto-populate as properties; verify types are correct
+      - Set the **entity key** (primary key) for each entity type:
+        | Entity Type          | Key                |
+        |----------------------|--------------------|
+        | suppliers            | supplier_id        |
+        | products             | product_id         |
+        | purchase_orders      | po_id              |
+        | shipments            | shipment_id        |
+        | inventory_positions  | product_id         |
+        | warehouses           | warehouse_id       |
+        | incidents            | incident_id        |
+      - Repeat for all 7 tables
+   d. **Add Relationships** — Click **+ Add relationship type** for each:
+      | Relationship              | From Entity        | To Entity            | Key               |
+      |---------------------------|--------------------|----------------------|-------------------|
+      | supplier_places_orders    | suppliers          | purchase_orders      | supplier_id       |
+      | product_in_orders         | products           | purchase_orders      | product_id        |
+      | order_has_shipments       | purchase_orders    | shipments            | po_id             |
+      | product_inventory         | products           | inventory_positions  | product_id        |
+      | warehouse_inventory       | warehouses         | inventory_positions  | warehouse_id      |
+      | supplier_incidents        | suppliers          | incidents            | supplier_id       |
+      - For each relationship, bind the foreign key property from your data
+   e. **Preview** — Click the graph view icon to visualize your ontology and confirm all entities and relationships appear
+   f. **Save** the ontology
 
 6. **Create Data Agent (from Ontology)** — In workspace:
    - **+ New** → **Data Agent** (preview)
    - Name: `petstoresupplychain-fabric-data-agent`
-   - **Data source: select the semantic model** `petstoresupplychain_ontology` (not the raw Lakehouse)
-   - The ontology gives the agent relationship awareness so it can join across tables correctly
+   - **Data source: select the ontology** `petstoresupplychain_ontology` (not the raw Lakehouse)
+   - The ontology (preview) gives the agent relationship awareness so it can join across tables correctly
    - Enable natural language queries
    - **Test**: *"Which pet food products are below reorder point?"*
    - **Publish** the agent
