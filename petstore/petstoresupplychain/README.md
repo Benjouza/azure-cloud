@@ -500,7 +500,7 @@ az role assignment create --assignee "$USER_ID" --role "Search Index Data Contri
 Upload the petstore retail policy documents from `data/knowledge/` to Azure AI Search:
 
 ```bash
-python3 scripts/upload_search_documents.py
+python3 infra/scripts/upload_search_documents.py
 ```
 
 This indexes 8 markdown files:

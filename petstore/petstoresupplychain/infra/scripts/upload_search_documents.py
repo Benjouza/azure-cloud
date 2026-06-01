@@ -25,7 +25,7 @@ load_dotenv(".env", override=True)
 
 SEARCH_ENDPOINT = os.environ.get("SEARCH_ENDPOINT", "")
 INDEX_NAME = "petstoresupplychain-knowledge"
-KNOWLEDGE_DIR = Path(__file__).parent.parent / "data" / "knowledge"
+KNOWLEDGE_DIR = Path(__file__).parent.parent.parent / "data" / "knowledge"
 
 if not SEARCH_ENDPOINT:
     print("ERROR: SEARCH_ENDPOINT not set. Source .env.generated or set it manually.")
