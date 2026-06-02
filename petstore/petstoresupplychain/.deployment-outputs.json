@@ -1,0 +1,295 @@
+{
+  "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/main",
+  "location": null,
+  "name": "main",
+  "properties": {
+    "correlationId": "4f3760a9-7079-48cc-a5e0-3c16072ef82b",
+    "debugSetting": null,
+    "dependencies": [
+      {
+        "dependsOn": [
+          {
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/logAnalytics",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "logAnalytics",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "apiVersion": "2025-04-01",
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/logAnalytics",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "logAnalytics",
+            "resourceType": "Microsoft.Resources/deployments"
+          }
+        ],
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/appInsights",
+        "resourceGroup": "petstoresupplychain",
+        "resourceName": "appInsights",
+        "resourceType": "Microsoft.Resources/deployments"
+      },
+      {
+        "dependsOn": [
+          {
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/foundryAccount",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "foundryAccount",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "apiVersion": "2025-04-01",
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/foundryAccount",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "foundryAccount",
+            "resourceType": "Microsoft.Resources/deployments"
+          }
+        ],
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/foundryProject",
+        "resourceGroup": "petstoresupplychain",
+        "resourceName": "foundryProject",
+        "resourceType": "Microsoft.Resources/deployments"
+      },
+      {
+        "dependsOn": [
+          {
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/acr",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "acr",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/foundryProject",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "foundryProject",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/logAnalytics",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "logAnalytics",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "apiVersion": "2025-04-01",
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/foundryProject",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "foundryProject",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "apiVersion": "2025-04-01",
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/acr",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "acr",
+            "resourceType": "Microsoft.Resources/deployments"
+          },
+          {
+            "apiVersion": "2025-04-01",
+            "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/logAnalytics",
+            "resourceGroup": "petstoresupplychain",
+            "resourceName": "logAnalytics",
+            "resourceType": "Microsoft.Resources/deployments"
+          }
+        ],
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Resources/deployments/roleAssignments",
+        "resourceGroup": "petstoresupplychain",
+        "resourceName": "roleAssignments",
+        "resourceType": "Microsoft.Resources/deployments"
+      }
+    ],
+    "diagnostics": null,
+    "duration": "PT9M29.3371261S",
+    "error": null,
+    "extensions": [],
+    "mode": "Incremental",
+    "onErrorDeployment": null,
+    "outputResources": [
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/petstoresupplychain-foundry",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.CognitiveServices/accounts"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.CognitiveServices/accounts/petstoresupplychain-foundry/projects/petstoresupplychain-foundryproject",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.CognitiveServices/accounts/projects"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.ContainerRegistry/registries/petstoresupplychainacrpjvwoas7xnir4",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.ContainerRegistry/registries"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.ContainerRegistry/registries/petstoresupplychainacrpjvwoas7xnir4/providers/Microsoft.Authorization/roleAssignments/a0b30cc2-d4fc-5157-bd29-1119b84cd433",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.Authorization/roleAssignments"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Insights/components/petstoresupplychain-appinsights",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.Insights/components"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.OperationalInsights/workspaces/petstoresupplychain-logs",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.OperationalInsights/workspaces"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.OperationalInsights/workspaces/petstoresupplychain-logs/providers/Microsoft.Authorization/roleAssignments/31d5aded-d60b-54be-b0d0-1307e47a6e9e",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.Authorization/roleAssignments"
+      },
+      {
+        "apiVersion": null,
+        "extension": null,
+        "id": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Search/searchServices/petstoresupplychain-search-pjvwoas7xnir4",
+        "identifiers": null,
+        "resourceGroup": "petstoresupplychain",
+        "resourceType": "Microsoft.Search/searchServices"
+      }
+    ],
+    "outputs": {
+      "acrId": {
+        "type": "String",
+        "value": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.ContainerRegistry/registries/petstoresupplychainacrpjvwoas7xnir4"
+      },
+      "acrLoginServer": {
+        "type": "String",
+        "value": "petstoresupplychainacrpjvwoas7xnir4.azurecr.io"
+      },
+      "acrName": {
+        "type": "String",
+        "value": "petstoresupplychainacrpjvwoas7xnir4"
+      },
+      "appInsightsConnectionString": {
+        "type": "String",
+        "value": "InstrumentationKey=45c50d4d-27eb-4b1f-a112-4fa6a1e6cfe3;IngestionEndpoint=https://swedencentral-0.in.applicationinsights.azure.com/;LiveEndpoint=https://swedencentral.livediagnostics.monitor.azure.com/;ApplicationId=8ba334a9-171a-43a8-b9a2-a52ae11df99c"
+      },
+      "foundryAccountName": {
+        "type": "String",
+        "value": "petstoresupplychain-foundry"
+      },
+      "logAnalyticsWorkspaceId": {
+        "type": "String",
+        "value": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.OperationalInsights/workspaces/petstoresupplychain-logs"
+      },
+      "projectEndpoint": {
+        "type": "String",
+        "value": "https://petstoresupplychain-foundry.services.ai.azure.com/api/projects/petstoresupplychain-foundryproject"
+      },
+      "projectName": {
+        "type": "String",
+        "value": "petstoresupplychain-foundryproject"
+      },
+      "projectPrincipalId": {
+        "type": "String",
+        "value": "6de766ef-b8cc-4153-92d2-838c5152197f"
+      },
+      "searchEndpoint": {
+        "type": "String",
+        "value": "https://petstoresupplychain-search-pjvwoas7xnir4.search.windows.net"
+      },
+      "searchId": {
+        "type": "String",
+        "value": "/subscriptions/1707a4cf-2cc6-469a-89d9-7da2589e3518/resourceGroups/petstoresupplychain/providers/Microsoft.Search/searchServices/petstoresupplychain-search-pjvwoas7xnir4"
+      }
+    },
+    "parameters": {
+      "acrName": {
+        "type": "String",
+        "value": "petstoresupplychainacrpjvwoas7xnir4"
+      },
+      "acrSku": {
+        "type": "String",
+        "value": "Basic"
+      },
+      "appInsightsName": {
+        "type": "String",
+        "value": "petstoresupplychain-appinsights"
+      },
+      "baseName": {
+        "type": "String",
+        "value": "petstoresupplychain"
+      },
+      "foundryAccountName": {
+        "type": "String",
+        "value": "petstoresupplychain-foundry"
+      },
+      "foundryProjectName": {
+        "type": "String",
+        "value": "petstoresupplychain-foundryproject"
+      },
+      "location": {
+        "type": "String",
+        "value": "swedencentral"
+      },
+      "logAnalyticsName": {
+        "type": "String",
+        "value": "petstoresupplychain-logs"
+      },
+      "searchServiceName": {
+        "type": "String",
+        "value": "petstoresupplychain-search-pjvwoas7xnir4"
+      },
+      "searchSku": {
+        "type": "String",
+        "value": "basic"
+      }
+    },
+    "parametersLink": null,
+    "providers": [
+      {
+        "id": null,
+        "namespace": "Microsoft.Resources",
+        "providerAuthorizationConsentState": null,
+        "registrationPolicy": null,
+        "registrationState": null,
+        "resourceTypes": [
+          {
+            "aliases": null,
+            "apiProfiles": null,
+            "apiVersions": null,
+            "capabilities": null,
+            "defaultApiVersion": null,
+            "locationMappings": null,
+            "locations": [
+              null
+            ],
+            "properties": null,
+            "resourceType": "deployments",
+            "zoneMappings": null
+          }
+        ]
+      }
+    ],
+    "provisioningState": "Succeeded",
+    "templateHash": "407164119508144536",
+    "templateLink": null,
+    "timestamp": "2026-05-30T21:13:35.720013+00:00",
+    "validatedResources": null,
+    "validationLevel": null
+  },
+  "resourceGroup": "petstoresupplychain",
+  "tags": null,
+  "type": "Microsoft.Resources/deployments"
+}

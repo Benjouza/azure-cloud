@@ -610,52 +610,56 @@ az role assignment create \
 
 ---
 
-### Phase 8: Run Locally & Validate
+### Phase 8: Run & Test Locally
 
-Test the agent locally before deploying to Foundry. The local code still uses the **cloud-hosted agent** in Foundry Agent Service — it creates a new agent version, opens a conversation, and sends messages to Foundry. It does NOT run the LLM locally.
+Run the same code locally that will be deployed to Foundry. Locally, the agent connects to Azure services (Foundry, AI Search, Fabric) via your `az login` credentials.
 
-#### Setup Local Environment
+#### 8.1 Setup Local Environment
 
 ```bash
 # 1. Create virtual environment
-python3.11 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Ensure .env has all required values
-cat .env
-# Should contain:
-#   AZURE_SUBSCRIPTION_ID=...
-#   AZURE_AI_PROJECT_ENDPOINT=...  (from .env.generated)
-#   MODEL_DEPLOYMENT_NAME=gpt-4o
-#   APPINSIGHTS_CONNECTION_STRING=... (from .env.generated)
-#   AGENT_NAME=petstoresupplychain-orchestrator-agent
-
-# 4. Authenticate to Azure
-az login && az account set --subscription $AZURE_SUBSCRIPTION_ID
-
-# 5. Run interactive CLI
-python run.py
+# 3. Authenticate to Azure
+az login && az account set --subscription $(grep AZURE_SUBSCRIPTION_ID .env | cut -d= -f2)
 ```
 
-#### Run as HTTP Server
+#### 8.2 Run as Interactive CLI
 
 ```bash
-pip install fastapi "uvicorn[standard]" pydantic
+python3 run.py
+```
+
+This creates an agent version in Foundry and starts an interactive chat in your terminal.
+
+#### 8.3 Run as HTTP Server (Same as Foundry Runtime)
+
+This is exactly how the agent runs when deployed to Foundry:
+
+```bash
 uvicorn src.server:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-Test the API:
+Test endpoints:
 ```bash
+# Health check
 curl http://localhost:8080/health
 
+# Chat (simple)
 curl -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What pet food products are running low on stock?"}'
+
+# Invoke (Foundry protocol — same payload Foundry sends)
+curl -X POST http://localhost:8080/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "What is our expedited shipping policy?"}]}'
 ```
 
-#### Test Queries
+#### 8.4 Test Queries
 
 | Query | Expected Tool | Expected Source |
 |-------|--------------|----------------|
@@ -667,91 +671,122 @@ curl -X POST http://localhost:8080/chat \
 
 ---
 
-### Phase 9: Deploy the Agent to Azure AI Foundry
+### Phase 9: Build & Deploy to Azure AI Foundry (Hosted Code Agent)
 
-#### 8.1 Deploy via CLI (Programmatic)
+Once validated locally, deploy to Foundry as a **Hosted (Code) agent**. This runs your Python code in Foundry's managed infrastructure and shows as **"Hosted"** type in the portal.
+
+#### 9.1 Build & Push Container Image
 
 ```bash
-cd petstore/petstoresupplychain
+# Source .env.generated for ACR_LOGIN_SERVER
+source .env.generated
 
-# Deploy hosted agent version to Foundry
-./deploy.sh
+# Login to Azure Container Registry
+az acr login --name $(echo $ACR_LOGIN_SERVER | cut -d. -f1)
 
-# Or with options
-python deploy_foundry_agent.py \
-  --agent-name petstoresupplychain-orchestrator-agent \
-  --prune-old-versions --keep 3
+# Build the Docker image
+docker build -t $ACR_LOGIN_SERVER/petstoresupplychain-orchestrator:latest .
+
+# Push to ACR
+docker push $ACR_LOGIN_SERVER/petstoresupplychain-orchestrator:latest
 ```
 
-#### 8.2 Configure via Azure AI Foundry Portal
+> **No Docker?** Build remotely with ACR:
+> ```bash
+> az acr build --registry $(echo $ACR_LOGIN_SERVER | cut -d. -f1) \
+>   --image petstoresupplychain-orchestrator:latest .
+> ```
 
-If you prefer portal-based setup or need to verify the agent configuration:
+#### 9.2 Deploy to Foundry
 
-1. **Navigate to your project:**
-   - Go to [ai.azure.com](https://ai.azure.com)
-   - Select project: **petstoresupplychain-foundryproject**
+```bash
+# Deploy container to Foundry as hosted agent
+./deploy.sh --method container
 
-2. **Create the Agent:**
-   - Go to **Agents** → **+ New Agent**
-   - Name: `petstoresupplychain-orchestrator-agent`
-   - Model: `gpt-4o` (select your deployed model)
-   - Paste the system instructions from `src/agent.py` → `SYSTEM_INSTRUCTIONS`
+# Or deploy source code directly (no Docker needed)
+./deploy.sh --method source
+```
 
-3. **Add the Fabric Data Agent Tool:**
-   - In the agent configuration, click **+ Add Tool**
-   - Select **Microsoft Fabric (Preview)**
-   - Connection: `petstoresupplychain-fabric-data-agent`
-   - This routes data queries (inventory, orders, shipments) to your Fabric Lakehouse
+After deployment, verify in the portal:
+- Go to [ai.azure.com](https://ai.azure.com) → project → **Agents**
+- You should see `petstoresupplychain-orchestrator-agent` with type **Hosted**
 
-4. **Add the Azure AI Search Tool:**
-   - Click **+ Add Tool** again
-   - Select **Azure AI Search**
-   - Connection: select your AI Search connection
-   - Index name: `petstoresupplychain-ai-search`
-   - Query type: **Semantic**
-   - Top K: `5`
-   - This routes policy/knowledge queries to your indexed documents
+#### 9.3 Project Structure — What Runs in Foundry
 
-5. **Test in Playground:**
-   - Use the built-in chat playground to verify the agent works
-   - Try: *"What pet products are below reorder point?"* → should invoke Fabric
-   - Try: *"What is our expedited shipping policy?"* → should invoke AI Search
-   - Try: *"Which suppliers are under review and what's the escalation process?"* → should invoke both tools
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Container definition (Python 3.13 + FastAPI + uvicorn) |
+| `agent.yaml` | Manifest — tells Foundry runtime, entrypoint, health check |
+| `src/server.py` | FastAPI app with `/health`, `/chat`, and `/invoke` endpoints |
+| `src/agent.py` | Your custom agent logic — tool wiring, system prompt, query execution |
+| `src/config.py` | Environment-based configuration |
+| `requirements.txt` | Python dependencies |
 
-6. **Publish the Agent Version:**
-   - Once satisfied, click **Publish** to create a versioned deployment
-   - Note the agent version ID for production use
-
-#### 8.3 Running in Azure AI Foundry Agent Service (Cloud-Hosted)
-
-The agent runs as a **hosted agent** in the Foundry Agent Service — no container or VM required:
+#### 9.4 Architecture
 
 ```mermaid
 graph LR
     subgraph FoundryService["Azure AI Foundry Agent Service"]
-        AV["petstoresupplychain-orchestrator-agent<br/>(Published Version)"]
-        RT["Agent Runtime<br/>(managed by Foundry)"]
+        Container["Your Python Code<br/>(Docker container)"]
+        Endpoints["/health  /invoke  /chat"]
     end
 
-    subgraph Tools["Connected Tools"]
-        F["petstoresupplychain-fabric-data-agent<br/>(Fabric connection)"]
-        S["petstoresupplychain-ai-search<br/>(Search connection)"]
+    subgraph Tools["Azure Services"]
+        F["Microsoft Fabric<br/>petstoresupplychain-fabric-data-agent"]
+        S["Azure AI Search<br/>petstoresupplychain-knowledge index"]
     end
 
-    Client["Client App / API"] -->|"responses.create()<br/>agent_reference"| AV
-    AV --> RT
-    RT --> F
-    RT --> S
-    AV -->|"grounded response"| Client
+    Client["Client / Foundry Portal"] -->|"POST /invoke"| Container
+    Container --> Endpoints
+    Endpoints --> F
+    Endpoints --> S
+    Container -->|"JSON response"| Client
 ```
 
-**How it works:**
-- The agent is deployed as a **PromptAgentDefinition** with model, instructions, and tools
-- Foundry Agent Service hosts and manages the agent runtime (no infrastructure to maintain)
-- Clients call it via the OpenAI-compatible `responses.create()` API with an `agent_reference`
-- The agent automatically routes to Fabric or AI Search based on intent classification
+**Key points:**
+- **Local** = `uvicorn src.server:app` on your laptop (same code, same endpoints)
+- **Foundry** = same container running in Foundry's managed infrastructure
+- Shows as **"Hosted"** in the portal (vs "Prompt" which is just a config declaration)
+- You have full control over the Python runtime — add custom logic, middleware, logging
+- Foundry injects `AZURE_AI_PROJECT_ENDPOINT` and managed identity automatically
 
-**Calling the hosted agent from any client:**
+#### 9.5 Configure Managed Identity (Required)
+
+The hosted agent runs with a **system-assigned managed identity**. This identity must have RBAC permissions to access the AI Project, connections (Fabric, AI Search), and model deployments. Without these roles, the agent will fail to start with authentication errors and the `/readiness` endpoint will never return HTTP 200.
+
+**Assign required roles:**
+
+```bash
+# Get the managed identity principal ID for your Foundry account
+PRINCIPAL_ID=$(az cognitiveservices account identity show \
+  --name <your-foundry-account-name> \
+  --resource-group <your-resource-group> \
+  --query principalId -o tsv)
+
+# Assign Cognitive Services OpenAI User (for model calls)
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Cognitive Services OpenAI User" \
+  --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group>"
+
+# Assign Azure AI Developer (for project/connections APIs)
+az role assignment create \
+  --assignee $PRINCIPAL_ID \
+  --role "Azure AI Developer" \
+  --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group>"
+```
+
+> **⏱️ Note:** Role assignments can take **1–5 minutes** to propagate. Wait before deploying or invoking the agent.
+
+**Verify roles are assigned:**
+
+```bash
+az role assignment list --assignee $PRINCIPAL_ID --all -o table
+```
+
+You should see both `Cognitive Services OpenAI User` and `Azure AI Developer`.
+
+#### 9.6 Calling the Deployed Agent
 
 ```python
 from azure.identity import DefaultAzureCredential
@@ -764,11 +799,8 @@ project_client = AIProjectClient(
 )
 
 openai_client = project_client.get_openai_client()
-
-# Create a conversation
 conversation = openai_client.conversations.create()
 
-# Send a message to the hosted agent
 response = openai_client.responses.create(
     input="What pet food products are running low on stock?",
     conversation=conversation.id,
@@ -783,11 +815,27 @@ response = openai_client.responses.create(
 print(response.output_text)
 ```
 
-**Monitoring in Foundry Portal:**
-- Go to **Agents** → select `petstoresupplychain-orchestrator-agent`
-- **Traces** tab: see all conversations, tool calls, and latency
-- **Sessions** tab: view active and historical sessions
-- **Metrics**: token usage, success rate, average latency
+#### 9.7 Monitoring & Troubleshooting
+
+- **Foundry Portal** → Agents → select agent → **Traces** / **Sessions** / **Metrics**
+- **App Insights** → traces from `src/telemetry.py` (OpenTelemetry)
+- **Log Stream** → available in Foundry portal under agent → Logs
+
+**Troubleshooting readiness timeout:**
+
+If you see `Session did not become ready within the expected timeout`:
+
+1. **Check managed identity roles** (see step 9.5) — most common cause
+2. **Check log stream** — if empty, the app may be crashing before Python starts (bad `entry_point` or missing dependency)
+3. **Test locally first:**
+   ```bash
+   source .venv/bin/activate
+   python run_server.py
+   # In another terminal:
+   curl http://localhost:8080/readiness
+   ```
+4. **Verify `PYTHONUNBUFFERED=1`** is set in environment variables (ensures logs flush to log stream immediately)
+5. **Check `APPINSIGHTS_CONNECTION_STRING`** is passed as an environment variable in the deploy
 
 ---
 

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/microsoft/AgentSchema/refs/heads/main/schemas/v1.0/ContainerAgent.yaml
+kind: hosted
+name: petstoresupplychain-orchestrator-agent
+description: |
+  PetStore Supply Chain Orchestrator Agent.
+  Tools: (1) Microsoft Fabric Data Agent – supply-chain data queries (inventory, orders, suppliers, shipments)
+         (2) Azure AI Search (Foundry IQ) – policy/knowledge retrieval (returns, compliance, SOPs)
+  Classifies user intent and delegates to the appropriate tool automatically.
+protocols:
+  - protocol: invocations
+    version: 1.0.0
+resources:
+  cpu: "1"
+  memory: 2Gi
+environment_variables:
+  - name: MODEL_DEPLOYMENT_NAME
+    value: ${MODEL_DEPLOYMENT_NAME}
+  - name: PYTHONUNBUFFERED
+    value: "1"

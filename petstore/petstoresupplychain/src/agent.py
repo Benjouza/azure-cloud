@@ -1,20 +1,17 @@
 """
 PetStore Supply Chain Orchestrator Agent
 
-Creates a hosted Foundry agent with two tools:
-  1. MicrosoftFabricPreviewTool – routes petstore supply-chain DATA inquiries to the Fabric data agent
-  2. AzureAISearchTool – routes POLICY / knowledge inquiries to Azure AI Search
-
-The agent's system prompt classifies incoming user messages by intent and
-delegates to the appropriate tool automatically.
+Hosted Foundry agent that handles invocations directly using the Azure AI Projects SDK.
+Routes queries to:
+  1. MicrosoftFabricPreviewTool – petstore supply-chain DATA inquiries via Fabric data agent
+  2. AzureAISearchTool – POLICY / knowledge inquiries via Azure AI Search
 """
 
-import os
 import logging
-from azure.identity import DefaultAzureCredential
+import sys
+from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
-    PromptAgentDefinition,
     MicrosoftFabricPreviewTool,
     FabricDataAgentToolParameters,
     ToolProjectConnection,
@@ -22,11 +19,12 @@ from azure.ai.projects.models import (
     AzureAISearchToolResource,
     AzureAISearchQueryType,
     ConnectionType,
-    MCPTool,
 )
 
 from src.config import settings
 from src.telemetry import configure_telemetry
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_INSTRUCTIONS = """You are the PetStore Supply Chain Orchestrator Agent.
 
@@ -56,100 +54,96 @@ If a query spans both intents, call both tools and synthesize the results.
 """
 
 
-def create_orchestrator_agent():
-    """Provision and return the orchestrator agent, OpenAI client, and project client."""
-    tracer = configure_telemetry()
+def create_orchestrator_client():
+    """Create and return the AI Project client with tools configured.
 
-    with tracer.start_as_current_span("create_orchestrator_agent"):
-        credential = DefaultAzureCredential()
-        project_client = AIProjectClient(
-            endpoint=settings.project_endpoint,
-            credential=credential,
+    Returns (project_client, tools).
+    """
+    logger.info("create_orchestrator_client: starting...")
+    configure_telemetry()
+
+    # Use ManagedIdentityCredential in hosted environments, with CLI fallback for local dev
+    from azure.identity import ManagedIdentityCredential, AzureCliCredential, ChainedTokenCredential
+
+    credential = ChainedTokenCredential(
+        ManagedIdentityCredential(),
+        AzureCliCredential(),
+    )
+    logger.info("Credential chain configured (ManagedIdentity → AzureCLI)")
+
+    project_client = AIProjectClient(
+        endpoint=settings.project_endpoint,
+        credential=credential,
+    )
+    logger.info("AIProjectClient created for endpoint: %s", settings.project_endpoint)
+
+    # --- Tool 1: Microsoft Fabric Data Agent (petstore supply-chain data queries) ---
+    logger.info("Fetching Fabric connection...")
+    fabric_conn = project_client.connections.get(
+        name="petstoresupplychain-fabric-data-agent"
+    )
+    logger.info("Fabric connection ID: %s", fabric_conn.id)
+    fabric_tool = MicrosoftFabricPreviewTool(
+        fabric_dataagent_preview=FabricDataAgentToolParameters(
+            project_connections=[
+                ToolProjectConnection(project_connection_id=fabric_conn.id)
+            ]
         )
+    )
 
-        # --- Tool 1: Microsoft Fabric Data Agent (petstore supply-chain data queries) ---
-        fabric_conn = project_client.connections.get(
-            name="petstoresupplychain-fabric-data-agent"
+    # --- Tool 2: Azure AI Search (policy/knowledge retrieval) ---
+    logger.info("Fetching Azure AI Search connection...")
+    search_conn = project_client.connections.get_default(
+        ConnectionType.AZURE_AI_SEARCH
+    )
+    logger.info("Search connection ID: %s", search_conn.id)
+    search_tool = AzureAISearchTool(
+        azure_ai_search=AzureAISearchToolResource(
+            indexes=[{
+                "project_connection_id": search_conn.id,
+                "index_name": "petstoresupplychain-knowledge",
+                "query_type": AzureAISearchQueryType.SEMANTIC,
+                "top_k": 5,
+            }]
         )
-        fabric_tool = MicrosoftFabricPreviewTool(
-            fabric_dataagent_preview=FabricDataAgentToolParameters(
-                project_connections=[
-                    ToolProjectConnection(project_connection_id=fabric_conn.id)
-                ]
-            )
-        )
+    )
 
-        # --- Tool 2: Azure AI Search (policy/knowledge retrieval) ---
-        search_conn = project_client.connections.get_default(
-            ConnectionType.AZURE_AI_SEARCH
-        )
-        search_tool = AzureAISearchTool(
-            azure_ai_search=AzureAISearchToolResource(
-                indexes=[{
-                    "project_connection_id": search_conn.id,
-                    "index_name": "petstoresupplychain-knowledge",
-                    "query_type": AzureAISearchQueryType.SEMANTIC,
-                    "top_k": 5,
-                }]
-            )
-        )
-
-        # --- Create the orchestrator agent version ---
-        agent = project_client.agents.create_version(
-            agent_name=settings.agent_name,
-            definition=PromptAgentDefinition(
-                model=settings.model_deployment,
-                instructions=SYSTEM_INSTRUCTIONS,
-                tools=[fabric_tool, search_tool],
-            ),
-        )
-        print(f"✓ Agent created – ID: {agent.id}, Name: {agent.name}, Version: {agent.version}")
-
-        # Get an OpenAI-compatible client for conversations
-        openai_client = project_client.get_openai_client()
-
-        # Create a conversation thread
-        conversation = openai_client.conversations.create()
-        print(f"✓ Conversation created – ID: {conversation.id}")
-
-        return project_client, openai_client, agent, conversation
+    tools = [fabric_tool, search_tool]
+    logger.info("Orchestrator client ready with %d tools", len(tools))
+    sys.stdout.flush()
+    return project_client, tools
 
 
-def run_query(openai_client, agent, conversation, user_message: str) -> str:
-    """Send a user message to the agent and return the assistant's response."""
+def run_query(project_client: AIProjectClient, tools: list, user_message: str) -> str:
+    """Send a user message via the agent service (responses API) and return the response.
+
+    The hosted agent definition already has tools (Fabric, AI Search) configured.
+    We use the OpenAI-compatible responses API with agent_reference to delegate
+    tool orchestration to the Foundry agent service.
+    """
     tracer = configure_telemetry()
 
     with tracer.start_as_current_span("run_query") as span:
         span.set_attribute("user_message", user_message)
+        logger.info("run_query: sending message (%d chars)", len(user_message))
+
+        openai_client = project_client.get_openai_client()
+        conversation = openai_client.conversations.create()
 
         response = openai_client.responses.create(
             input=user_message,
-            conversation=conversation.id,
-            extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+            model=settings.model_deployment,
+            extra_body={
+                "conversation_id": conversation.id,
+                "agent_reference": {
+                    "name": settings.agent_name,
+                    "type": "agent_reference",
+                },
+            },
         )
-
-        # Log tool call results so we can see Fabric/Search failures inline
-        for item in getattr(response, 'output', []):
-            item_type = getattr(item, 'type', None)
-            if item_type == 'tool_call':
-                name = getattr(item, 'name', '?')
-                status = getattr(item, 'status', '?')
-                logging.warning(f"[tool_call] {name} → status={status}")
-            elif item_type == 'tool_result':
-                tool = getattr(item, 'tool_call_id', '?')
-                content = str(getattr(item, 'content', ''))[:300]
-                logging.warning(f"[tool_result] {tool}: {content}")
 
         result = response.output_text
         span.set_attribute("response_length", len(result))
+        logger.info("run_query: response received (%d chars)", len(result))
         return result
-
-
-def cleanup(project_client: AIProjectClient, agent):
-    """Delete the agent version."""
-    project_client.agents.delete_version(
-        agent_name=agent.name,
-        agent_version=agent.version,
-    )
-    print("✓ Agent version deleted.")
 

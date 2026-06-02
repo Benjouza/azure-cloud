@@ -1,12 +1,6 @@
 """
-Server for the PetStore Supply Chain Orchestrator Agent.
-
-Uses the azure-ai-agentserver-invocations protocol library which automatically
-exposes /readiness and /invocations endpoints expected by Foundry.
-
-Required environment variables:
-    FOUNDRY_PROJECT_ENDPOINT: Foundry project endpoint (auto-injected in hosted containers)
-    MODEL_DEPLOYMENT_NAME: Model deployment name
+PetStore Supply Chain Orchestrator — Foundry Hosted Agent
+Entry point: python main.py
 """
 
 import json
@@ -20,41 +14,35 @@ logging.basicConfig(
     stream=sys.stdout,
     force=True,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("petstoresupplychain")
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from azure.ai.projects.aio import AIProjectClient
-from azure.identity.aio import DefaultAzureCredential
-
 from azure.ai.agentserver.invocations import InvocationAgentServerHost
 
-# Read config from environment (Foundry auto-injects FOUNDRY_PROJECT_ENDPOINT)
-_endpoint = os.environ.get("FOUNDRY_PROJECT_ENDPOINT") or os.environ.get("AZURE_AI_PROJECT_ENDPOINT")
-if not _endpoint:
-    logger.error("Neither FOUNDRY_PROJECT_ENDPOINT nor AZURE_AI_PROJECT_ENDPOINT is set")
-    raise EnvironmentError("FOUNDRY_PROJECT_ENDPOINT environment variable is not set.")
-
+# Read config — Foundry auto-injects FOUNDRY_PROJECT_ENDPOINT
+_endpoint = os.environ.get("FOUNDRY_PROJECT_ENDPOINT") or os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
 _model = os.environ.get("MODEL_DEPLOYMENT_NAME", "gpt-4o")
 logger.info("Config: endpoint=%s, model=%s", _endpoint, _model)
 
-# Lazy-initialized on first invocation so the server starts instantly
-# and /readiness passes before any credential resolution happens.
-_credential = None
-_project_client = None
+# Lazy-initialized on first invocation so /readiness passes immediately
 _openai_client = None
 
 
-def _get_openai_client():
-    global _credential, _project_client, _openai_client
+async def _get_openai_client():
+    global _openai_client
     if _openai_client is None:
         logger.info("Initializing Azure credentials and OpenAI client...")
-        _credential = DefaultAzureCredential()
-        _project_client = AIProjectClient(endpoint=_endpoint, credential=_credential)
-        _openai_client = _project_client.get_openai_client()
+        from azure.ai.projects.aio import AIProjectClient
+        from azure.identity.aio import DefaultAzureCredential
+
+        credential = DefaultAzureCredential()
+        project_client = AIProjectClient(endpoint=_endpoint, credential=credential)
+        _openai_client = project_client.get_openai_client()
         logger.info("OpenAI client initialized successfully.")
     return _openai_client
+
 
 _SYSTEM_PROMPT = """You are the PetStore Supply Chain Orchestrator Agent.
 
@@ -85,7 +73,7 @@ If a query spans both intents, call both tools and synthesize the results.
 
 app = InvocationAgentServerHost()
 
-# In-memory session history (keyed by session_id)
+# In-memory session history
 _sessions: dict[str, list[dict[str, str]]] = {}
 
 
@@ -103,7 +91,6 @@ async def handle_invoke(request: Request):
         else:
             if isinstance(data, dict):
                 user_message = data.get("message") or data.get("input") or ""
-                # Also check messages array format
                 if not user_message:
                     messages = data.get("messages", [])
                     for msg in reversed(messages):
@@ -131,7 +118,7 @@ async def handle_invoke(request: Request):
     history.append({"role": "user", "content": user_message})
 
     try:
-        openai_client = _get_openai_client()
+        openai_client = await _get_openai_client()
         response = await openai_client.responses.create(
             model=_model,
             instructions=_SYSTEM_PROMPT,
